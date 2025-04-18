@@ -54,6 +54,20 @@ trap(struct trapframe *tf)
       wakeup(&ticks);
       release(&tickslock);
     }
+    // 处理 alarm
+    struct proc *p = myproc();
+    if(p != 0 && (tf->cs & 3) == 3) { // 确保进程正在运行且中断来自用户空间
+      if(p->alarmticks > 0) { // 确保 alarm 已设置
+        p->ticksleft--;
+        if(p->ticksleft <= 0) { // 时间到，调用处理函数
+          // 重置计时器
+          p->ticksleft = p->alarmticks;
+          
+          // 直接调用 cprintf 打印 "alarm!" 消息
+          cprintf("alarm!\n");
+        }
+      }
+    }
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:

@@ -12,10 +12,13 @@ main(int argc, char *argv[])
     exit();
   }
 
-  // 打印当前UTC时间，格式：YYYY-MM-DD HH:MM:SS
-  printf(1, "%d-%02d-%02d %02d:%02d:%02d\n", 
-         r.year, r.month, r.day,
-         r.hour, r.minute, r.second);
+  // 以易读的格式打印时间
+  printf(1, "UTC time: %d-", r.year);
+  printf(1, "%d-", r.month);
+  printf(1, "%d ", r.day);
+  printf(1, "%d:", r.hour);
+  printf(1, "%d:", r.minute);
+  printf(1, "%d\n", r.second);
 
   exit();
 }

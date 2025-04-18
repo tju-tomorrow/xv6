@@ -90,17 +90,31 @@ sys_uptime(void)
   return xticks;
 }
 
-// 获取当前UTC时间的系统调用实现
+// 获取当前日期和时间
 int
 sys_date(void)
 {
   struct rtcdate *r;
   
-  // 获取用户传入的rtcdate结构体指针
   if(argptr(0, (char**)&r, sizeof(*r)) < 0)
     return -1;
   
-  // 调用cmostime获取当前时间
   cmostime(r);
+  return 0;
+}
+
+int
+sys_alarm(void)
+{
+  int ticks;
+  void (*handler)();
+
+  if(argint(0, &ticks) < 0)
+    return -1;
+  if(argptr(1, (char**)&handler, 1) < 0)
+    return -1;
+  myproc()->alarmticks = ticks;
+  myproc()->alarmhandler = handler;
+  myproc()->ticksleft = ticks;
   return 0;
 }
