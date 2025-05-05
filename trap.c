@@ -8,6 +8,9 @@
 #include "traps.h"
 #include "spinlock.h"
 
+// 声明 mappages 函数
+int mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
+
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
@@ -100,6 +103,37 @@ trap(struct trapframe *tf)
               tf->trapno, cpuid(), tf->eip, rcr2());
       panic("trap");
     }
+    
+    // 处理页面错误（懒分配）
+    if(tf->trapno == T_PGFLT) {
+      uint va = PGROUNDDOWN(rcr2()); // 获取导致页面错误的虚拟地址并向下取整到页面边界
+      struct proc *p = myproc();
+      
+      // 检查地址是否在进程的地址空间内
+      if(va < p->sz) {
+        char *mem = kalloc(); // 分配一页物理内存
+        if(mem == 0) {
+          cprintf("lazy alloc: out of memory\n");
+          p->killed = 1;
+          break;
+        }
+        
+        // 清零新分配的内存页
+        memset(mem, 0, PGSIZE);
+        
+        // 将新分配的物理页映射到虚拟地址空间
+        if(mappages(p->pgdir, (char*)va, PGSIZE, V2P(mem), PTE_W|PTE_U) < 0) {
+          cprintf("lazy alloc: mappages failed\n");
+          kfree(mem);
+          p->killed = 1;
+          break;
+        }
+        
+        // 成功处理页面错误，返回继续执行
+        return;
+      }
+    }
+    
     // In user space, assume process misbehaved.
     cprintf("pid %d %s: trap %d err %d on cpu %d "
             "eip 0x%x addr 0x%x--kill proc\n",
