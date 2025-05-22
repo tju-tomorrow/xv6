@@ -372,9 +372,10 @@ iunlockput(struct inode *ip)
 static uint
 bmap(struct inode *ip, uint bn)
 {
-  uint addr, *a;
-  struct buf *bp;
+  uint addr, *a, *b;
+  struct buf *bp, *bp2;
 
+  // Direct blocks
   if(bn < NDIRECT){
     if((addr = ip->addrs[bn]) == 0)
       ip->addrs[bn] = addr = balloc(ip->dev);
@@ -382,6 +383,7 @@ bmap(struct inode *ip, uint bn)
   }
   bn -= NDIRECT;
 
+  // Singly-indirect blocks
   if(bn < NINDIRECT){
     // Load indirect block, allocating if necessary.
     if((addr = ip->addrs[NDIRECT]) == 0)
@@ -392,6 +394,42 @@ bmap(struct inode *ip, uint bn)
       a[bn] = addr = balloc(ip->dev);
       log_write(bp);
     }
+    brelse(bp);
+    return addr;
+  }
+  bn -= NINDIRECT;
+
+  // Doubly-indirect blocks
+  if(bn < NDOUBLEINDIRECT){
+    // Load doubly-indirect block, allocating if necessary
+    if((addr = ip->addrs[NDIRECT+1]) == 0)
+      ip->addrs[NDIRECT+1] = addr = balloc(ip->dev);
+    
+    // Load the outer indirect block
+    bp = bread(ip->dev, addr);
+    a = (uint*)bp->data;
+    
+    // Calculate which inner indirect block we need
+    uint outer_idx = bn / NINDIRECT;
+    uint inner_idx = bn % NINDIRECT;
+    
+    // Load or allocate the inner indirect block
+    if((addr = a[outer_idx]) == 0){
+      a[outer_idx] = addr = balloc(ip->dev);
+      log_write(bp);
+    }
+    
+    // Load the inner indirect block
+    bp2 = bread(ip->dev, addr);
+    b = (uint*)bp2->data;
+    
+    // Load or allocate the data block
+    if((addr = b[inner_idx]) == 0){
+      b[inner_idx] = addr = balloc(ip->dev);
+      log_write(bp2);
+    }
+    
+    brelse(bp2);
     brelse(bp);
     return addr;
   }
@@ -407,10 +445,11 @@ bmap(struct inode *ip, uint bn)
 static void
 itrunc(struct inode *ip)
 {
-  int i, j;
-  struct buf *bp;
-  uint *a;
+  int i, j, k;
+  struct buf *bp, *bp2;
+  uint *a, *b;
 
+  // Free direct blocks
   for(i = 0; i < NDIRECT; i++){
     if(ip->addrs[i]){
       bfree(ip->dev, ip->addrs[i]);
@@ -418,6 +457,7 @@ itrunc(struct inode *ip)
     }
   }
 
+  // Free singly-indirect blocks
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -428,6 +468,28 @@ itrunc(struct inode *ip)
     brelse(bp);
     bfree(ip->dev, ip->addrs[NDIRECT]);
     ip->addrs[NDIRECT] = 0;
+  }
+
+  // Free doubly-indirect blocks
+  if(ip->addrs[NDIRECT+1]){
+    bp = bread(ip->dev, ip->addrs[NDIRECT+1]);
+    a = (uint*)bp->data;
+    for(i = 0; i < NINDIRECT; i++){
+      if(a[i]){
+        // Free each singly-indirect block
+        bp2 = bread(ip->dev, a[i]);
+        b = (uint*)bp2->data;
+        for(k = 0; k < NINDIRECT; k++){
+          if(b[k])
+            bfree(ip->dev, b[k]);
+        }
+        brelse(bp2);
+        bfree(ip->dev, a[i]);  // Free the singly-indirect block itself
+      }
+    }
+    brelse(bp);
+    bfree(ip->dev, ip->addrs[NDIRECT+1]);  // Free the doubly-indirect block
+    ip->addrs[NDIRECT+1] = 0;
   }
 
   ip->size = 0;
