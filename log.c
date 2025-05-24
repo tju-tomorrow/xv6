@@ -66,17 +66,29 @@ initlog(int dev)
 }
 
 // Copy committed blocks from log to their home location
+// Copy committed blocks from log to their home location
+// fromlog: if 1, read from log disk. if 0, the blocks are already in memory.
 static void
-install_trans(void)
+install_trans(int fromlog)
 {
   int tail;
 
   for (tail = 0; tail < log.lh.n; tail++) {
-    struct buf *lbuf = bread(log.dev, log.start+tail+1); // read log block
-    struct buf *dbuf = bread(log.dev, log.lh.block[tail]); // read dst
-    memmove(dbuf->data, lbuf->data, BSIZE);  // copy block to dst
+    struct buf *lbuf = 0;
+    struct buf *dbuf;
+    
+    if (fromlog)
+      lbuf = bread(log.dev, log.start+tail+1); // read log block
+    
+    dbuf = bread(log.dev, log.lh.block[tail]); // read dst
+    
+    if (fromlog)
+      memmove(dbuf->data, lbuf->data, BSIZE);  // copy from log to dst
+    
     bwrite(dbuf);  // write dst to disk
-    brelse(lbuf);
+    
+    if (fromlog)
+      brelse(lbuf);
     brelse(dbuf);
   }
 }
@@ -116,9 +128,10 @@ static void
 recover_from_log(void)
 {
   read_head();
-  install_trans(); // if committed, copy from log to disk
+  cprintf("recovery: n=%d\n", log.lh.n);
+  install_trans(1);  // 1表示从日志中读取，因为块可能不在内存中
   log.lh.n = 0;
-  write_head(); // clear the log
+  write_head();
 }
 
 // called at the start of each FS system call.
@@ -189,13 +202,15 @@ write_log(void)
   }
 }
 
+#include "mmu.h"
+#include "proc.h"
 static void
 commit()
 {
   if (log.lh.n > 0) {
     write_log();     // Write modified blocks from cache to log
     write_head();    // Write header to disk -- the real commit
-    install_trans(); // Now install writes to home locations
+    install_trans(0);  // 0表示不从日志中读取，因为块已经在内存中
     log.lh.n = 0;
     write_head();    // Erase the transaction from the log
   }
